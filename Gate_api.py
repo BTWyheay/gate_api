@@ -1,16 +1,14 @@
 #!/opt/anaconda/bin/python
-from __future__ import print_function
-
 import time
-
 import pandas as pd
 import gate_api
 from gate_api.exceptions import ApiException, GateApiException
 import os
 import datetime
 import numpy as np
-
-
+import logging
+import smtplib
+from email.mime.text import MIMEText
 # Defining the host is optional and defaults to https://api.gateio.ws/api/v4
 # See configuration.py for a list of all supported configuration parameters.
 # The client must configure the authentication and authorization parameters
@@ -18,14 +16,50 @@ import numpy as np
 # Examples for each auth method are provided below, use the example that
 # satisfies your auth use case.
 # Configure APIv4 key authorization
-### 查询k线信息，并保存数据到
+# Email format   timestamp: content:
+#
+class EmailMessage():
+    def __init__(self, user,psw,sender):
+        self.user = user
+        self.psw = psw
+        self.sender = sender
+        self.host = 'smtp.gmail.com'
+
+    def sendEmail(self,receivers, content,title ):
+        message = MIMEText(content,'plain','utf-8')
+        message['From'] = '{}'.format(self.sender)
+        message['To']= ','.join(receivers)
+        message['Subject']= title
+
+        try:
+            smtpObj = smtplib.SMTP_SSL(self.host,465)
+            smtpObj.login(self.user,self.psw)
+            smtpObj.sendmail(self.sender,receivers,message.as_string())
+            print('successfully')
+        except smtplib.SMTPException as e:
+            print(e)
+email = EmailMessage('fhljlu61', psw = 'psyyzgjhzsxjbtbi', sender = 'fhljlu61@)gmail.com')
+
+class MaxConnect(Exception):
+    def __init__(self):
+        self.message = 'MaxConnect'
+    def __str__(self):
+        return self.message
+
+Email_instance = EmailMessage('fhljlu61', psw = 'psyyzgjhzsxjbtbi', sender = 'fhljlu61@)gmail.com')
+
+
 class Gate_Api():
-    def __init__(self, key: str, secret: str, host='https://api.gateio.ws/api/v4'):
+    def __init__(self, key: str, secret: str, MaxTime:int,MaxConnections:int,receiver:str,host='https://api.gateio.ws/api/v4'):
         self.configuration = gate_api.Configuration(
             host=host,
             key=key,
             secret=secret
         )
+        format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        logging.basicConfig(level=logging.INFO, format=format, filename ='log.txt')
+        logging.getLogger('gate')
+
         self.api_client =gate_api.ApiClient(self.configuration)
         self.create_order_record = []  # 下单信息记录
         self.get_order_record = []  # 订单状态查询记录
@@ -37,11 +71,20 @@ class Gate_Api():
         self.future_price_record = [] # 记录查询的期货k线信息
         self.future_orders = [] # 记录
         self.create_futures_trigger_order =[] # 记录期货下单信息
-
-    ## 查询K线数据
-    def candelsticks(self, Type: str, currency_pair: str, contract:str,interval: str, limit=1, _from=None, to=None, settle='usdt', ):
+        self.orders_record =[] #record the orders info
+        self.get_order_record = []  # record the orders info
+        self.contracts =[] # record every futures contract traded
+        self.connect_times = 0
+        self.connect_start_time = 0 # seconds
+        self.MaxTime = MaxTime
+        self.MaxConnections = MaxConnections ## 查询K线数据
+        self.receiver = receiver
+    def candelsticks(self, Type: str, currency_pair: str,interval: str, limit=1, _from=None, to=None, settle='usdt', contract='BTC_USDT'):
         api_client = gate_api.ApiClient(self.configuration)
+
         if (_from!= None) and (to !=None):
+            _from = int(pd.to_datetime(_form).timestamp())
+            to = int(pd.to_datetime(to).timestamp())
             if Type == 'Spot':
                 api_instance = gate_api.SpotApi(api_client)
                 currency_pair = currency_pair
@@ -55,9 +98,10 @@ class Gate_Api():
                     time_amount = interval_time * interval_scale_set[interval_scale]
                     time_range = to - _from
 
-                    loop_time = int(time_range / (time_amount * 100)) + 1
+                    loop_time = int(time_range / (time_amount)/1000) + 1
                     price = []
-                    if loop_time <= 100:
+                    if loop_time <= 1:
+                        print('a')
                         api_response = api_instance.list_candlesticks(currency_pair, limit=limit, interval=interval,
                                                                       _from=_from, to=to)
                         for i in api_response:
@@ -67,16 +111,19 @@ class Gate_Api():
                             price.append(pp)
                     else:
                         time_seq = [_from, ]
-                        for k in range(0, loop_time - 1):
-                            next_to = time_seq[k] + 100 * time_amount
+                        for k in range(0, loop_time-1 ):
+                            next_to = time_seq[k] +999 * time_amount
                             time_seq.append(next_to)
                         time_seq.append(to)
                         price = []
-                        for k in range(0, loop_time - 1):
-                            api_response = api_instance.list_candlesticks(currency_pair, limit=100, interval=interval,
+                        price_slice = []
+
+                        for k in range(0, loop_time):
+
+                            api_response = api_instance.list_candlesticks(currency_pair, interval=interval,
                                                                           _from=time_seq[k], to=time_seq[k + 1])
-                            price_slice = []
                             for i in api_response:
+
                                 pp = {'timestamp': int(i[0]), 'TotalAmount': float(i[1]),
                                       'ClosePrice': float(i[2]), 'HighPrice': float(i[3]),
                                       'LowPrice': float(i[4]), 'Open': float(i[5])}
@@ -126,7 +173,7 @@ class Gate_Api():
                         time_seq.append(to)
                         price = []
                         for k in range(0, loop_time - 1):
-                            api_response = api_instance.list_candlesticks(currency_pair, limit=100, interval=interval,
+                            api_response = api_instance.list_futures_candlesticks(currency_pair, limit=100, interval=interval,
                                                                           _from=time_seq[k], to=time_seq[k + 1])
                             price_slice = []
                             for i in api_response:
@@ -145,9 +192,63 @@ class Gate_Api():
                     print("Exception when calling FuturesApi->list_candlesticks: %s\n" % e)
                     price = None
                 return price
+        elif (limit!=None):
+            if limit <= 1000:
+                if Type =='Spot':
+                    api_instance = gate_api.SpotApi(api_client)
+                    currency_pair = currency_pair
+                    interval = interval
+                    ls = locals()  #
+                    price = []
+                    try:
+                        api_response = api_instance.list_candlesticks(currency_pair, limit=limit, interval=interval,
+                                                                  _from=_from, to=to)
+                        price = {'timestamp': int(i[0]), 'TotalAmount': float(i[1]),
+                              'ClosePrice': float(i[2]), 'HighPrice': float(i[3]),
+                              'LowPrice': float(i[4]), 'Open': float(i[5])}
+                        price = pd.DataFrame(price)
+                    except GateApiException as ex:
+                        print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                        price = None
+                    except ApiException as e:
+                        print("Exception when calling SpotApi->list_candlesticks: %s\n" % e)
+                        price = None
+                    return price
+                if Type == 'Futures':
+                    api_instance = gate_api.FuturesApi(api_client)
+                    currency_pair = currency_pair
+                    interval = interval
+                    ls = locals()  #
+                    price = []
+                    try:
+                        api_response = api_instance.list_futures_candlesticks(currency_pair, limit=limit, interval=interval,
+                                                                  _from=_from, to=to)
+                        price = {'timestamp': int(i[0]), 'TotalAmount': float(i[1]),
+                              'ClosePrice': float(i[2]), 'HighPrice': float(i[3]),
+                              'LowPrice': float(i[4]), 'Open': float(i[5])}
+                        price = pd.DataFrame(price)
+                    except GateApiException as ex:
+                        print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                        price = None
+                    except ApiException as e:
+                        print("Exception when calling FuturesApi->list_candlesticks: %s\n" % e)
+                        price = None
+            else:
+                api_instance = get_api.SpotApi(api_client)
+                end_check = api_instance.list_candlesticks(currency_pair = currency_pair, limit =1,interval =interval,
+                                                            _from = None,to =None)
+                end_time = int(api_instance[0])
+
+                loop_time = int(limit/1000)+1
+                interval_scale_set = {'d': 24 * 60 * 60, 'h': 60 * 60, 'm': 60, 's': 1}
+                interval_time = int(interval[0])
+                interval_scale = interval[1]
+                time_amount = interval_time * interval_scale_set[interval_scale]
+                start_time = end_time - limit*time_amount
+                self.candelsticks(Type=Type,currency_pair=currency_pair,interval =interval, _from =start_time, to = end_time)
         else:
             api_instance = gate_api.SpotApi(api_client)
-            if type =='Spot':
+            if Type =='Spot':
                 try:
                     api_reponse = api_instance.list_candlesticks(currency_pair=currency_pair, limit=limit,
                                                                  interval=interval, _from=_from, to=to)
@@ -164,8 +265,9 @@ class Gate_Api():
                 except ApiException as e:
                     print("Exception when calling SpotApi->list_candlesticks: %s\n" % e)
                     price = None
+                price = pd.DataFrame(price)
                 return price
-            if type =='Futures':
+            if Type =='Futures':
                 # Create an instance of the API class
                 api_instance = gate_api.FuturesApi(api_client)  # FuturesApi
                 try:
@@ -184,8 +286,40 @@ class Gate_Api():
                 except ApiException as e:
                     print("Exception when calling FuturesApi->list_candlesticks: %s\n" % e)
                     price = None
-                return price
+                price = pd.DataFrame(price)
 
+                return price
+    def list_tickers(self,Type:str,currency_pair:str):
+        api_client = gate_api.ApiClient(self.configuration)
+        if Type =='Spot':
+            api_instance = gate_api.SpotApi(api_client)
+            try:
+                # Retrieve ticker information
+                api_response = api_instance.list_tickers(currency_pair=currency_pair)
+                print(api_response)
+            except GateApiException as ex:
+                print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                logging.error(ex)
+            except ApiException as e:
+                print("Exception when calling SpotApi->list_tickers: %s\n" % e)
+                logging.error(e)
+                self.list_tickers(Type=Type,currency_pair=currency_pair)
+        if Type =='Futures':
+            api_instance = gate_api.FuturesApi(api_client)
+            settle = 'usdt'  # str | Settle currency
+            contract = 'BTC_USDT'  # str | Futures contract, return related data only if specified (optional)
+
+            try:
+                # List futures tickers
+                api_response = api_instance.list_futures_tickers(settle, contract=contract)
+                print(api_response)
+            except GateApiException as ex:
+                print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                logging.error(ex)
+
+            except ApiException as e:
+                print("Exception when calling FuturesApi->list_futures_tickers: %s\n" % e)
+                logging.error(ex)
     ## futures rate history
     #         api_client = gate_api.ApiClient(self.configuration)
     def futures_rates_history(self,settle:str, contract:str, limit:int):
@@ -197,128 +331,309 @@ class Gate_Api():
             print(api_response)
         except GateApiException as ex:
             api_response =None
+            content = 'Timestamp: {timestamp}, Gate api exception, label: {label}, message: %s\n'.format(
+                timestamp='timestamp', s=ex.message, label=label)
+            email.sendEmail(receivers=self.receiver, content=content, title='error_report')
             print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+            api_response = self.futures_rates_history(settle=settle, contract=contract, limit=limit)
+
+
         except ApiException as e:
             print("Exception when calling FuturesApi->list_futures_funding_rate_history: %s\n" % e)
-            api_response =None
+            api_response = None
         return api_response
-
-
-    ##下单函数
+    ####################################下单函数##########################################################################
+    ####################################################################################################################
     def create_order(self, Type: str, currency_pair: str, amount: str, price: str, side: str,settle='usdt',contract='BTC_USDT',size=1,close=False,auto_size=None,text=None,
                      order_type='limit', auto_borrow=None, iceberg=None, time_in_force='gtc',tif ='gtc'):
+        '''
+
+        '''
+
         # Create an instance of the API class
-        api_client = gate_api.ApiClient(self.configuration)
-        if Type =='Spot':
-            api_instance = gate_api.SpotApi(api_client)
-            order = gate_api.Order(text=text, currency_pair=currency_pair, type=order_type, account="spot", side=side,
-                                   iceberg=iceberg,
-                                   amount=amount, price=price, time_in_force=time_in_force, auto_borrow=auto_borrow)
-            try:
-                # Create an order
-                api_response = api_instance.create_order(order)
-                print(api_response)
-                self.create_order_record.append(api_response.to_dict())
-            except GateApiException as ex:
-                print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
-                api_response = None
-            except ApiException as e:
-                print("Exception when calling SpotApi->create_order: %s\n" % e)
-                api_response = None
-            return api_response.to_dict()  # 输出下单信息
-        if Type =='Futures':
-            api_instance = gate_api.FuturesApi(api_client)
-            futures_orders = gate_api.FuturesOrder(contract = contract, size =size, close=close, atuo_size=auto_size, price=price, iceberg= iceberg, text=text,
-                                                  tif=tif)
-            try:
-                # Create a futures order
-                api_response = api_instance.create_futures_order(settle, futures_orders)
-                self.future_orders[api_response.to_dict()]
-                print(api_response)
-            except GateApiException as ex:
-                print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
-                api_response =None
-            except ApiException as e:
-                print("Exception when calling FuturesApi->create_futures_order: %s\n" % e)
-                api_response = None
-            return api_response.to_dict()
-    # cancel orders1
+        # check the connection times within given time
+        self.connect_times = self.connect_times + 1
+        if self.connect_starttime == 0:
+            self.connect_starttime = time.time()
+
+        try:
+            order_time = time.time()
+            if (order_time < self.connect_starttime + self.MaxTime) and (self.connect_times > self.MaxConnections):
+                self.connect_times = 0
+                self.connect_start_time = 0
+                raise MaxConnect()
+            else :
+                api_client = gate_api.ApiClient(self.configuration)
+                if Type == 'Spot':
+                    api_instance = gate_api.SpotApi(api_client)
+                    order = gate_api.Order(text=text, currency_pair=currency_pair, type=order_type, account="spot",
+                                           side=side,
+                                           iceberg=iceberg,
+                                           amount=amount, price=price, time_in_force=time_in_force,
+                                           auto_borrow=auto_borrow)
+                    try:
+                        # Create an order
+                        api_response = api_instance.create_order(order)
+                        api_response = api_response.to_dict()
+                        print(api_response)
+                        self.create_order_record.append(api_response.to_dict())
+                        logging.info(str(api_response.to_dict()))
+                    except GateApiException as ex:
+                        print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                        logging.warning("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                        content ='Timestamp: {timestamp}, Gate api exception, label: {label}, message: %s\n'.format(timestamp ='timestamp', s =ex.message,label=label)
+                        email.sendEmail(receivers='', content=content, title='error_report')
+                        api_response = self.create_order(Type=Type, currency_pair=currency_pair, amount=amount, price=price, side=side,settle=settle,contract=contract,size=size,close=close,auto_size=auto_size,text=text,
+                     order_type=order_type, auto_borrow=auto_borrow, iceberg=iceberg, time_in_force=time_in_force,tif =tif)
+
+                    except ApiException as e:
+                        print("Exception when calling SpotApi->create_order: %s\n" % e)
+                        logging.warning("Exception when calling SpotApi->create_order: %s\n" % e)
+                        api_response = self.create_order_record(Type=Type, currency_pair=currency_pair, amount=amount, price=price, side=side,settle=settle,contract=contract,size=size,close=close,auto_size=auto_size,text=text,
+                     order_type=order_type, auto_borrow=auto_borrow, iceberg=iceberg, time_in_force=time_in_force,tif =tif)
+
+                    return api_response  # 输出下单信息
+                if Type == 'Futures':
+                    api_instance = gate_api.FuturesApi(api_client)
+                    futures_orders = gate_api.FuturesOrder(contract=contract, size=size, close=close,
+                                                           atuo_size=auto_size, price=price, iceberg=iceberg, text=text,
+                                                           tif=tif)
+                    try:
+                        # Create a futures order
+                        api_response = api_instance.create_futures_order(settle, futures_orders)
+                        self.future_orders[api_response.to_dict()]
+                        logging.info(str(api_response.to_dict()))
+                        api_response =api_response.to_dict()
+                        print(api_response)
+                    except GateApiException as ex:
+                        print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                        logging.warning("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                        content = 'Timestamp: {timestamp}, Gate api exception, label: {label}, message: %s\n'.format(
+                            timestamp='timestamp', s=ex.message, label=label)
+                        email.sendEmail(receivers='', content=content, title='error_report')
+                        api_response = self.create_order(Type=Type, currency_pair=currency_pair, amount=amount,
+                                                         price=price, side=side, settle=settle, contract=contract,
+                                                         size=size, close=close, auto_size=auto_size, text=text,
+                                                         order_type=order_type, auto_borrow=auto_borrow,
+                                                         iceberg=iceberg, time_in_force=time_in_force, tif=tif)
+
+                    except ApiException as e:
+                        print("Exception when calling FuturesApi->create_futures_order: %s\n" % e)
+                        logging.warning("Exception when calling FuturesApi->create_futures_order: %s\n" % e)
+
+                        api_response = None
+                    return api_response
+
+        except MaxConnect as e:
+            print ('Out of MaxTimes ')
+            logging.error(e)
+
+    # 综合订单
     def orders(self,Type:str,currency_pair:str,amount :str,price:str,side:str,upper_price:str,down_price:str,settle='usdt',contract='BTC_USDT',size=1,close=False,auto_size=None,text=None,
                      order_type='limit', auto_borrow=None, iceberg=None, time_in_force='gtc',tif ='gtc',waiting_time=10,expiration=60):
-        if Type =='Spot':
-            api_client = gate_api.ApiClient(self.configuration)
-            api_instance = gate_api.SpotApi(api_client)
-            order = gate_api.Order(text=text, currency_pair=currency_pair, type=order_type, account="spot", side=side,
+
+        if self.connect_starttime == 0:
+            self.connect_starttime = time.time()
+        try:
+            order_time = time.time()
+            if (order_time < self.connect_starttime + self.MaxTime) and (self.connect_times > self.MaxConnections):
+                self.connect_times = 0
+                self.connect_start_time = 0
+                raise MaxConnect()
+            else:
+                if Type =='Spot':
+                    api_client = gate_api.ApiClient(self.configuration)
+                    api_instance = gate_api.SpotApi(api_client)
+                    order = gate_api.Order(text=text, currency_pair=currency_pair, type=order_type, account="spot", side=side,
                                    iceberg=iceberg,
                                    amount=amount, price=price, time_in_force=time_in_force, auto_borrow=auto_borrow)
-            try:
+                    try:
                 # Create an order
-                api_response = api_instance.create_order(order)
-                print(api_response)
-                self.create_order_record.append(api_response.to_dict())
-            except GateApiException as ex:
-                print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
-                api_response = None
-            except ApiException as e:
-                print("Exception when calling SpotApi->create_order: %s\n" % e)
-                api_response = None
-            if api_response != None:
-                time.sleep(waiting_time)
-                order_id = api_response.id
-                order_info = self.get_order(Type = 'Spot',order_id=order_id, currency_pair=currency_pair)
-                if order_info.status =='closed':
-                    buy_side_op = {'buy': 'sell', 'sell': 'buy'}
+                        api_response = api_instance.create_order(order)
+                        print(api_response)
+                        self.create_order_record.append(api_response.to_dict())
+                        logging.info(str(api_response.to_dict()))
+                    except GateApiException as ex:
+                        print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                        logging.warning("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                        content ='Timestamp: {timestamp}, Gate api exception, label: {label}, message: %s\n'.format(timestamp ='timestamp', s =ex.message,label=label)
+                        email.sendEmail(receivers='', content=content, title='error_report')
+                        api_response = self.orders(Type=Type,currency_pair=currency_pair,amount=amount,price=price,side=side,upper_price=upper_price,down_price=down_price,settle=settle,contract=contract,size=size,close=close,auto_size=auto_size,text=text,
+                     order_type=order_type, auto_borrow=auto_borrow, iceberg=iceberg, time_in_force=time_in_force,tif =tif,waiting_time=waiting_time,expiration=expiration)
+                    except ApiException as e:
+                        print("Exception when calling SpotApi->create_order: %s\n" % e)
+                        api_response = None
+                    if api_response != None:
+                        time.sleep(waiting_time)
+                        order_id = api_response.id
+                        order_info = self.get_order(Type = 'Spot',order_id=order_id, currency_pair=currency_pair)
+                        if order_info.status =='closed':
+                            buy_side_op = {'buy': 'sell', 'sell': 'buy'}
                     # stop profit order
-                    upper_trigger = {'price': upper_price, 'rule': '>=', 'expiration': expiration}
+                            upper_trigger = {'price': upper_price, 'rule': '>=', 'expiration': expiration}
 
-                    upper_put = {"type": order_type, "side": buy_side_op[side], "price": upper_price, "amount": amount,
+                            upper_put = {"type": order_type, "side": buy_side_op[side], "price": upper_price, "amount": amount,
                                  "account": "normal",
                                  "time_in_force": time_in_force}
-                    upper_order = self.create_order_record(Type='str', currency_pair=currency_pair,
+                            upper_order = self.create_trigger_order(Type='Spot', currency_pair=currency_pair,
                                                            trigger=upper_trigger, put=upper_put)
                     # stop_loss
-                    down_trigger = {'price': down_price, 'rule': '<=', 'expiration': expiration}
+                            down_trigger = {'price': down_price, 'rule': '<=', 'expiration': expiration}
 
-                    down_put = {"type": order_type, "side": buy_side_op[side], "price": down_price, "amount": amount,
+                            down_put = {"type": order_type, "side": buy_side_op[side], "price": down_price, "amount": amount,
                                 "account": "normal",
                                 "time_in_force": time_in_force}
-                    down_order = self.create_order_record(Type='str', currency_pair=currency_pair,
+                            down_order = self.create_trigger_order(Type='Spot', currency_pair=currency_pair,
                                                           trigger=down_trigger, put=down_put)
-                else:
-                    print('order is not closed, please set trigger order manually')
-                    down_order = None
-                    upper_order = None
 
+                        else:
+                            print('order is not closed, please set trigger order manually')
+                            down_order = None
+                            upper_order = None
+                        re = {'order': api_response.to_dict(), 'upper': upper_order, 'down': down_order,'Type':'Spot'}
+                        self.orders_record.append(re)
+                        logging.info(str(re))
+                        return re
+                if Type == 'Futures':
+                    api_client = gate_api.ApiClient(self.configuration)
+                    api_instance = gate_api.FUturesApi(api_client)
+                    order = gate_api.FuturesOrde(text=text, currency_pair=currency_pair, type=order_type,
+                                                 account="spot", side=side,
+                                                 iceberg=iceberg,
+                                                 amount=amount, price=price, time_in_force=time_in_force,
+                                                 auto_borrow=auto_borrow)
+                    try:
+                        # Create an order
+                        api_response = api_instance.create_futures_order(order)
+                        print(api_response)
+                        logging.info(api_response.to_dict())
+                    except GateApiException as ex:
+                        print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                        api_response = None
+                        logging.error(ex)
+                    except ApiException as e:
+                        print("Exception when calling FututresApi->create_order: %s\n" % e)
+                        api_response = None
+                        logging.error(e)
+                    if api_response != None:
+                        time.sleep(waiting_time)
+                        order_id = api_response.id
+                        order_info = self.get_order(Type='Futures', order_id=order_id, currency_pair=currency_pair)
+                        if order_info.status == 'closed':
+                            buy_side_op = {'buy': 'sell', 'sell': 'buy'}
+                            # stop profit order
+                            upper_trigger = {'price': upper_price, 'rule': '>=', 'expiration': expiration}
 
+                            upper_put = {"type": order_type, "side": buy_side_op[side], "price": upper_price,
+                                         "amount": amount,
+                                         "account": "normal",
+                                         "time_in_force": time_in_force}
+                            upper_order = self.create_trigger_order(Type='Futures', currency_pair=currency_pair,
+                                                                    trigger=upper_trigger, put=upper_put)
+                            # stop_loss
+                            down_trigger = {'price': down_price, 'rule': '<=', 'expiration': expiration}
 
-    def cancel_orders(self, Type:str, currency_pair:str, side:str,settle='usdt',contract='BTC_USDT'):
-        api_client = gate_api.ApiClient(self.configuration)
+                            down_put = {"type": order_type, "side": buy_side_op[side], "price": down_price,
+                                        "amount": amount,
+                                        "account": "normal",
+                                        "time_in_force": time_in_force}
+                            down_order = self.create_trigger_order(Type='Futures', currency_pair=currency_pair,
+                                                                   trigger=down_trigger, put=down_put)
+                        else:
+                            print('order is not closed, please set trigger order manually')
+                            down_order = None
+                            upper_order = None
+                        re = {'order': api_response.to_dict(), 'upper': upper_order, 'down': down_order,
+                              'Type': 'Futurees'}
+                        self.orders_record.append(re)
+                        return re
 
-        if Type =='Spot':
-            api_instance = gate_api.SpotApi(api_client)
-            try:
-                # Cancel all `open` orders in specified currency pair
-                api_response = api_instance.cancel_orders(currency_pair, side=side, account='spot')
-                print(api_response)
-            except GateApiException as ex:
-                print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
-            except ApiException as e:
-                print("Exception when calling SpotApi->cancel_orders: %s\n" % e)
-        if Type == 'Futures':
-            api_instance = gate_api.FuturesApi(api_client)
-            try:
-                # Cancel all `open` orders matched
-                api_response = api_instance.cancel_futures_orders(settle=settle, contract=contract, side=side)
-                print(api_response)
+        except MaxConnect as e:
+            print ('out of Maxtimes')
+            logging.error(e)
+    ### 价格触发订单 ##
+    def create_trigger_order(self, Type: str, trigger: dict, put: dict, currency_pair: str,initial={},settle='usdt'):
+        '''
+        :param trigger: price: str,trigger price, rule: str, >= or <= , expiration: int, how long to wait (second)
+        :param put: type:str, default limit,, side:str, price:str,OrderPrice,amount:str,type: str  normal for spot trading margin for margin trading ,
+        time_in_force: str gtc：GoodTillCancelled  ioc:ImmediateOrCancelled taker only
+        :param currency_pair: currency_pair
+           trigger = {"price": "6.9", "rule": ">=", "expiration": 60}
+            put = {"type": "limit", "side": "buy", "price": "6.9", "amount": "1.00000000", "account": "normal",
+                   "time_in_force": "gtc"}
 
-            except GateApiException as ex:
-                print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
-                api_response = None
-            except ApiException as e:
-                print("Exception when calling FuturesApi->cancel_futures_orders: %s\n" % e)
-                api_response = None
-            return api_response
+        :param initial: contract:str, size:[optional] int, price : Set to 0 to use market price, close: bool,
+                tif : Time in force, if using market price, only 'ioc' is supported ,GoodTillCancelled (gtc),ImmediateOrCancalled(ioc)
+        :param trigger: strategy_type:int,price_type: int, price :str, rule :str, expiration: int
+        :return:
+        '''
+        if self.connect_starttime == 0:
+            self.connect_starttime = time.time()
+        try:
+            order_time = time.time()
+            if (order_time < self.connect_starttime + self.MaxTime) and (self.connect_times > self.MaxConnections):
+                self.connect_times = 0
+                self.connect_start_time = 0
+                raise MaxConnect()
+            else:
+                if Type == 'Spot':
+                    api_client = gate_api.ApiClient(self.configuration)
+                    api_instance = gate_api.SpotApi(api_client)
+                    spot_price_triggered_order = gate_api.SpotPriceTriggeredOrder(trigger=trigger, put=put,
+                                                                                  market=currency_pair)  # SpotPriceTriggeredOrder |
+                    try:
+                        # Create a price-triggered order
+                        api_response = api_instance.create_spot_price_triggered_order(spot_price_triggered_order)
+                        print(api_response)
+                        self.create_order_record.append(api_response.to_dict())
+                        api_response = api_response.to_dict()
+                    except GateApiException as ex:
+                        print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
 
+                        api_response = None
+
+                    except ApiException as e:
+                        api_response = None
+                        print("Exception when calling SpotApi->create_spot_price_triggered_order: %s\n" % e)
+
+                    return api_response
+                if Type == 'Futures':
+                    api_client = gate_api.ApiClient(self.configuration)
+                    api_instance = gate_api.SpotApi(api_client)
+                    futures_price_triggered_order = gate_api.FuturesPriceTriggeredOrder(initial=initial,
+                                                                                        trigger=trigger)  # FuturesPriceTriggeredOrder |
+                    try:
+                        # Create a price-triggered order
+                        api_response = api_instance.create_price_triggered_order(settle, futures_price_triggered_order)
+                        print(api_response)
+                        self.create_futures_trigger_order(api_response.to_dict)
+                    except GateApiException as ex:
+                        print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                        api_response = None
+
+                    except ApiException as e:
+                        print("Exception when calling FuturesApi->create_price_triggered_order: %s\n" % e)
+                        api_response = None
+
+                    return api_response.to_dict()
+
+        except MaxConnect as e:
+            print('out of Maxtimes')
+            logging.error(e)
+
+    ####################################查询函数##########################################################################
+    ####################################################################################################################
+    def get_orders(self,record=None,check=True):
+        if record != None:
+            Type = record['Type']
+            currency_pair = record['order']['currency_pair']
+            order_id = record['order']['id']
+            order_info = self.get_order(Type =Type,currency_pair=currency_pair,order_id=order_id)
+            trigger_upper_info = self.get_trigger_order(Type =Type,id=record['upper']['id'],check=check,pair=record['down']['id'])
+            trigger_down_info = self.get_trigger_order(Type =Type,id=record['down']['id'],check=check,pair=record['upper']['id'])
+            re = {'order_info':order_info,'trigger_upper_info':trigger_upper_info,'trigger_down_info':trigger_down_info}
+            self.get_order_record.append(re)
+            return re
     ## 查询订单信息
     def get_order(self,Type:str, order_id: str, currency_pair: str, settle='usdt'):
         if Type =='Spot':
@@ -357,59 +672,6 @@ class Gate_Api():
                 print("Exception when calling FuturesApi->get_futures_order: %s\n" % e)
                 api_response =None
             return api_response.to_dict()
-    ##
-    ### 价格触发订单 ##
-    def create_trigger_order(self, Type: str, trigger: dict, put: dict, currency_pair: str,initial={},settle='usdt'):
-        '''
-        :param trigger: price: str,trigger price, rule: str, >= or <= , expiration: int, how long to wait (second)
-        :param put: type:str, default limit,, side:str, price:str,OrderPrice,amount:str,type: str  normal for spot trading margin for margin trading ,
-        time_in_force: str gtc：GoodTillCancelled  ioc:ImmediateOrCancelled taker only
-        :param currency_pair: currency_pair
-           trigger = {"price": "6.9", "rule": ">=", "expiration": 60}
-            put = {"type": "limit", "side": "buy", "price": "6.9", "amount": "1.00000000", "account": "normal",
-                   "time_in_force": "gtc"}
-            try:
-        :param initial: contract:str, size:[optional] int, price : Set to 0 to use market price, close: bool,
-                tif : Time in force, if using market price, only 'ioc' is supported ,GoodTillCancelled (gtc),ImmediateOrCancalled(ioc)
-        :param trigger: strategy_type:int,price_type: int, price :str, rule :str, expiration: int
-        :return:
-        '''
-        if Type == 'Spot':
-            api_client = gate_api.ApiClient(self.configuration)
-            api_instance = gate_api.SpotApi(api_client)
-            spot_price_triggered_order = gate_api.SpotPriceTriggeredOrder(trigger=trigger, put=put,
-                                                                          market=currency_pair)  # SpotPriceTriggeredOrder |
-            try:
-                # Create a price-triggered order
-                api_response = api_instance.create_spot_price_triggered_order(spot_price_triggered_order)
-                print(api_response)
-                self.create_order_record.append(api_response.to_dict())
-            except GateApiException as ex:
-                print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
-                api_response = None
-
-            except ApiException as e:
-                api_response = None
-                print("Exception when calling SpotApi->create_spot_price_triggered_order: %s\n" % e)
-            return api_response.to_dict()
-        if Type =='Futures':
-            api_client = gate_api.ApiClient(self.configuration)
-            api_instance = gate_api.SpotApi(api_client)
-            futures_price_triggered_order = gate_api.FuturesPriceTriggeredOrder(initial=initial, trigger=trigger)  # FuturesPriceTriggeredOrder |
-            try:
-                # Create a price-triggered order
-                api_response = api_instance.create_price_triggered_order(settle, futures_price_triggered_order)
-                print(api_response)
-                self.create_futures_trigger_order(api_response.to_dict)
-            except GateApiException as ex:
-                print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
-                api_response = None
-
-            except ApiException as e:
-                print("Exception when calling FuturesApi->create_price_triggered_order: %s\n" % e)
-                api_response = None
-
-            return api_response.to_dict()
     ## 查询限价订单订单执行情况
     def get_trigger_order(self, Type: str, id: str, check=False,settle='usdt',pair=None):
         '''
@@ -425,13 +687,18 @@ class Gate_Api():
                 api_response = api_instance.get_spot_price_triggered_order(order_id)
                 print(api_response)
                 self.get_order_record.append(api_response.to_dict())
+                if check:
+                    status = api_response.status
+                    if status == 'closed':
+                        self.cancel_trigger_order(Type='Spot', order_id=id, settle=settle, pair_id=pair)
+                        api_response =api_response.to_dict()
             except GateApiException as ex:
                 print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
                 api_response = None
             except ApiException as e:
                 print("Exception when calling SpotApi->get_spot_price_triggered_order: %s\n" % e)
                 api_response = None
-            return api_response.to_dict()
+            return api_response
         if Type == 'Futures':
             api_client = gate_api.ApiClient(self.configuration)
             # Create an instance of the API class
@@ -443,68 +710,54 @@ class Gate_Api():
                 # Get a single order
                 api_response = api_instance.get_price_triggered_order(settle, order_id)
                 print(api_response)
+
                 if check:
                     status = api_response.status
                     if status =='closed':
                         self.cancel_trigger_order(Type='Futures',order_id=id, settle = settle,pair_id=pair)
+                api_response = api_response.to_ditc()
 
             except GateApiException as ex:
                 print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                api_response=None
             except ApiException as e:
                 print("Exception when calling FuturesApi->get_price_triggered_order: %s\n" % e)
+                api_response=None
+            return api_response
 
-
-    ### 撤销订单
-    def cancel_trigger_order(self,Type:str,order_id: str,settle=None,pair_id=None):
-        api_client = gate_api.ApiClient(self.configuration)
+    def list_all_open_orders(self,Type:str,page:int,limit:int):
         if Type =='Spot':
-            api_instance = gate_api.SpotApi(self.api_client)
-            order_id = order_id  # str | Retrieve the data of the order with the specified ID
             try:
-                # Cancel a single order
-                api_response = api_instance.cancel_spot_price_triggered_order(order_id)
-                self.get_order_record.append(api_response.to_dict())
-                print(api_response)
-            except GateApiException as ex:
-                print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
-                api_response = None
-
-            except ApiException as e:
-                print("Exception when calling SpotApi->cancel_spot_price_triggered_order: %s\n" % e)
-                api_response = None
-        if Type =='Futures':
-            api_instance = gate_api.FuturesApi(api_client)
-            settle = settle  # str | Settle currency
-            order_id = pair_id  # str | Retrieve the data of the order with the specified ID
-
-            try:
-                # Cancel a single order
-                api_response = api_instance.cancel_price_triggered_order(settle, order_id)
-                self.future_orders.append(api_response)
-                print(api_response)
-            except GateApiException as ex:
-                print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
-            except ApiException as e:
-                print("Exception when calling FuturesApi->cancel_price_triggered_order: %s\n" % e)
-
-
-        return api_response
-        ## list all trades
-
-    ## list all trades
-    def list_all_open_orders(self,type:str,page:int,limit:int):
-
-        try:
             # List all open orders
+                api_client = gate_api.ApiClient(self.configuration)
+                api_instance = gate_api.SpotApi(api_client)
+                api_response = api_instance.list_all_open_orders(page=page, limit=limit, account=Type.lower())
+                print(api_response)
+            except GateApiException as ex:
+                print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+            except ApiException as e:
+                print("Exception when calling SpotApi->list_all_open_orders: %s\n" % e)
+        if Type =='Futures':
             api_client = gate_api.ApiClient(self.configuration)
-            api_instance = gate_api.SpotApi(api_client)
-            api_response = api_instance.list_all_open_orders(page=page, limit=limit, account=type.lower())
-            print(api_response)
-        except GateApiException as ex:
-            print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
-        except ApiException as e:
-            print("Exception when calling SpotApi->list_all_open_orders: %s\n" % e)
-    def list_trades(self, type: str, currency_pair: str, page: int, limit: int, trigger_status: str, account: str,
+            api_instance = gate_api.FtuuresApi(api_client)
+            settle = 'usdt'
+            status = 'open'
+            all_open_orders =[]
+            for contract in  self.contracts:
+                try:
+                    api_response = api_instance.list_futures_orders(settle,contract,status)
+                    all_open_orders.append(api_response)
+
+                except GateApiException as ex:
+                    print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                    logging.warning("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                except ApiException as e:
+                    print("Exception when calling SpotApi->list_all_open_orders: %s\n" % e)
+                    logging.warning("Exception when calling SpotApi->list_all_open_orders: %s\n" % e)
+            logging.info(str(all_open_orders))
+            return all_open_orders
+
+    def list_trades(self, Type: str, currency_pair: str, page: int, limit: int, trigger_status: str, account: str,
                     offset: int, last_id=None, reverse=True, _from=None, to=None):
         '''
         :param type:
@@ -517,7 +770,7 @@ class Gate_Api():
         :param to: # int | Time range ending, default to current time (optional)
         :return:
         '''
-        if type == 'Spot':
+        if Type == 'Spot':
             api_client = gate_api.ApiClient(self.configuration)
 
             api_instance = gate_api.SpotApi(api_client)
@@ -557,17 +810,130 @@ class Gate_Api():
     def list_positon(self,settle):
         api_client = gate_api.ApiClient(self.configuration)
         api_instance = gate_api.FuturesApi(api_client)
-        settle = 'usdt'  # str | Settle currency
+        settle = settle  # str | Settle currency
 
         try:
             # List all positions of a user
             api_response = api_instance.list_positions(settle)
+            logging.info(str(api_response))
             print(api_response)
         except GateApiException as ex:
             print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
         except ApiException as e:
             print("Exception when calling FuturesApi->list_positions: %s\n" % e)
 
+
+    ####################################取消订单函数##########################################################################
+    ####################################################################################################################
+    def cancel_orders(self, Type:str, currency_pair:str, side:str,settle='usdt',contract='BTC_USDT'):
+        api_client = gate_api.ApiClient(self.configuration)
+
+        if Type =='Spot':
+            api_instance = gate_api.SpotApi(api_client)
+            try:
+                # Cancel all `open` orders in specified currency pair
+                api_response = api_instance.cancel_orders(currency_pair, side=side, account='spot')
+                print(api_response)
+            except GateApiException as ex:
+                print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+            except ApiException as e:
+                print("Exception when calling SpotApi->cancel_orders: %s\n" % e)
+        if Type == 'Futures':
+            api_instance = gate_api.FuturesApi(api_client)
+            try:
+                # Cancel all `open` orders matched
+                api_response = api_instance.cancel_futures_orders(settle=settle, contract=contract, side=side)
+                print(api_response)
+
+            except GateApiException as ex:
+                print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                api_response = None
+            except ApiException as e:
+                print("Exception when calling FuturesApi->cancel_futures_orders: %s\n" % e)
+                api_response = None
+            return api_response4
+    # cancel a single order
+    def cancel_single_order(self,Type:str, id:str,currency_pair:str, account:str,setle:str):
+        api_client = gate_api.ApiClient(self.configuration)
+        if Type =='Spot':
+
+            api_instance = gate_api.SpotApi(api_client)
+            order_id = id  # str | Order ID returned, or user custom ID(i.e., `text` field). Operations based on custom ID are accepted only in the first 30 minutes after order creation.After that, only order ID is accepted.
+            currency_pair = currency_pair  # str | Currency pair
+            account = account  # str | Specify operation account. Default to spot and margin account if not specified. Set to `cross_margin` to operate against margin account (optional)
+
+            try:
+                # Cancel a single order
+                api_response = api_instance.cancel_order(order_id, currency_pair, account=account)
+                print(api_response)
+                logging.inof(api_response.to_dict())
+
+            except GateApiException as ex:
+                print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                logging.error(ex)
+            except ApiException as e:
+                print("Exception when calling SpotApi->cancel_order: %s\n" % e)
+                logging.error(e)
+            return
+        if Type =='Futures':
+            api_instance = gate_api.FuturesApi(api_client)
+            settle = settle  # str | Settle currency
+            order_id = id  # str | Order ID returned, or user custom ID(i.e., `text` field). Operations based on custom ID are accepted only in the first 30 minutes after order creation.After that, only order ID is accepted.
+
+            try:
+                # Cancel a single order
+                api_response = api_instance.cancel_futures_order(settle, order_id)
+                print(api_response)
+            except GateApiException as ex:
+                print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+            except ApiException as e:
+                print("Exception when calling FuturesApi->cancel_futures_order: %s\n" % e)
+    ### 撤销订单
+    def cancel_trigger_order(self,Type:str,order_id: str,settle=None,pair_id=None):
+        api_client = gate_api.ApiClient(self.configuration)
+        if Type =='Spot':
+            api_instance = gate_api.SpotApi(self.api_client)
+            order_id = pair_id  # str | Retrieve the data of the order with the specified ID
+            try:
+                # Cancel a single order
+                api_response = api_instance.cancel_spot_price_triggered_order(order_id)
+                self.get_order_record.append(api_response.to_dict())
+                logging.info(api_response.to_dict())
+                print(api_response)
+            except GateApiException as ex:
+                print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                logging.error(ex)
+                api_response = None
+
+            except ApiException as e:
+                print("Exception when calling SpotApi->cancel_spot_price_triggered_order: %s\n" % e)
+                api_response = None
+                logging.error(e)
+        if Type =='Futures':
+            api_instance = gate_api.FuturesApi(api_client)
+            settle = settle  # str | Settle currency
+            order_id = pair_id  # str | Retrieve the data of the order with the specified ID
+
+            try:
+                # Cancel a single order
+                api_response = api_instance.cancel_price_triggered_order(settle, order_id)
+                self.future_orders.append(api_response.to_dict())
+                logging.info(api_response.to_dict())
+                print(api_response)
+            except GateApiException as ex:
+                print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
+                logging.error(ex)
+            except ApiException as e:
+                print("Exception when calling FuturesApi->cancel_price_triggered_order: %s\n" % e)
+                logging.error(e)
+
+
+        return api_response
+        ## list all trades
+
+    ###cancel_price_triggered_order_list
+    ####################################账户函数##########################################################################
+    ####################################################################################################################
     def get_account(self,currency =None):
         # Create an instance of the API class
 
@@ -590,6 +956,17 @@ class Gate_Api():
             print("Exception when calling SpotApi->list_spot_accounts: %s\n" % e)
             re = None
         return re
+    def Close_position(self,price:dict,currency =None,Type = 'Spot'):
+        if Type =='Spot':
+            position_amount = self.get_account(currency = currency)
+            for item in position_amount[0:-1]:
+                currency_pair= item.get('currency') +"_USDT"
+                amount = item.get('available')
+                amount = float(amount)
+                price = float(price.get('currency'))
+                order = self.create_order(Type = 'Spot',currency_pair=currency_pair,price = price,side = 'sell')
+                logging.info('Close {cur} postion, amount: {amount},price:{price}'.format(cur=currency,amount =amount, pirce =price))
+
     def close_time(self,timestamp,interval):
         '''
 
@@ -605,37 +982,57 @@ class Gate_Api():
         next_time =(int(timestamp/time_amount)+1)*time_amount
         return close_time,next_time
 
-    def account_value(self,interval:str,account_info=None):
-        #  获取当前账户持有币种信息和
-        if account_info == None:
 
-            value_dist = None
+
+
+    def account_value(self,checktime:str, account='all',interval = None):
+        #  获取当前账户持有币种信息和
+        if account !='all':
+            if checktime=='Now':
+                pair = account +'_USDT'
+                tick_info = self.list_tickers(Type ='Spot',currency_pair = pair)
+                tick_price = tick_info[1]
+                account_info = self.get_account()
 
         else:
-            account_info = self.get_account()
-            timestamp= account_info[-1]
-            account_info.pop(-1)
-            timestamp =int(timestamp)
-            Close_time, next_time = self.close_time(timestamp =timestamp,interval =interval)
-            value_dist = {}
-            value_dist['timestamp'] = Close_time
-            for i in account_info:
-                if (i['currency'] !='USDT') and (i['currency']!= 'POINT'):
-                    currency_pair = i['currency'] +"_USDT"
-                    amount = float(i['available']) + float(i['locked'])
-                    Candelsticks = self.candelsticks(type='Spot', currency_pair=currency_pair,_from=Close_time,to=next_time,interval=interval)
-                    value_dist[currency_pair] = amount*Candelsticks['ClosePrice']
-            usdt = np.array(account_info)[[i['currency'] == 'USDT' for i in account_info]]
-            value_dist['USDT'] = usdt[0]['available']
-            self.account.append([value_dist])
+            if checktime=='Now':
+                account_info = self.get_account()
+                timestamp = account_info[-1]
+                account_info.pop(-1)
+                value_dist = {}
+                value_dist['timestamp'] = timestamp
+                for i in account_info:
+                    if (i['currency'] != 'USDT') and (i['currency'] != 'POINT'):
+                        currency_pair = i['currency'] + "_USDT"
+                        amount = float(i['available']) + float(i['locked'])
+                        ticker = self.list_tickers(Type ='Spot',currency_pair =currency_pair)[0]
+                        value_dist[currency_pair] = amount * ticker[1]
+                usdt = np.array(account_info)[[i['currency'] == 'USDT' for i in account_info]]
+                value_dist['USDT'] = usdt[0]['available']
+                self.account.append([value_dist])
+            else:
+                account_info = self.get_account()
+                timestamp = int(pd.to_datetime(checktime).timestamp())
+                account_info.pop(-1)
+                Close_time, next_time = self.close_time(timestamp=timestamp, interval=interval)
+                value_dist = {}
+                value_dist['timestamp'] = Close_time
+                for i in account_info:
+                    if (i['currency'] != 'USDT') and (i['currency'] != 'POINT'):
+                        currency_pair = i['currency'] + "_USDT"
+                        amount = float(i['available']) + float(i['locked'])
+                        Candelsticks = self.candelsticks(Type='Spot', currency_pair=currency_pair, _from=Close_time,
+                                                         to=next_time, interval=interval)
+                        value_dist[currency_pair] = amount * Candelsticks['ClosePrice']
+                usdt = np.array(account_info)[[i['currency'] == 'USDT' for i in account_info]]
+                value_dist['USDT'] = usdt[0]['available']
+                self.account.append([value_dist])
+
+
         return value_dist
 
 
         ###
-
-
-
-
 
     def save(self, path=os.getcwd()):
         if self.create_order_record != []:
@@ -664,6 +1061,13 @@ class Gate_Api():
                 for j in i[0].keys():
                     with open('{path}/account_record.csv'.format(path=path), 'a+') as f:
                         f.write('{}:{}\n'.format(j, i[0][j]))
+
+        if self.orders_record != []:
+            for i in self.orders_record:
+                for j in i[0].keys():
+                    with open('{path}/orders_record.csv'.format(path=path), 'a+') as f:
+                        f.write('{}:{}\n'.format(j, i[0][j]))
+
 
 
 
