@@ -83,7 +83,7 @@ class Gate_Api():
         api_client = gate_api.ApiClient(self.configuration)
 
         if (_from!= None) and (to !=None):
-            _from = int(pd.to_datetime(_form).timestamp())
+            _from = int(pd.to_datetime(_from).timestamp())
             to = int(pd.to_datetime(to).timestamp())
             if Type == 'Spot':
                 api_instance = gate_api.SpotApi(api_client)
@@ -203,9 +203,9 @@ class Gate_Api():
                     try:
                         api_response = api_instance.list_candlesticks(currency_pair, limit=limit, interval=interval,
                                                                   _from=_from, to=to)
-                        price = {'timestamp': int(i[0]), 'TotalAmount': float(i[1]),
-                              'ClosePrice': float(i[2]), 'HighPrice': float(i[3]),
-                              'LowPrice': float(i[4]), 'Open': float(i[5])}
+                        price = {'timestamp': int(api_response[0]), 'TotalAmount': float(api_response[1]),
+                              'ClosePrice': float(api_response[2]), 'HighPrice': float(api_response[3]),
+                              'LowPrice': float(api_response[4]), 'Open': float(api_response[5])}
                         price = pd.DataFrame(price)
                     except GateApiException as ex:
                         print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
@@ -223,9 +223,9 @@ class Gate_Api():
                     try:
                         api_response = api_instance.list_futures_candlesticks(currency_pair, limit=limit, interval=interval,
                                                                   _from=_from, to=to)
-                        price = {'timestamp': int(i[0]), 'TotalAmount': float(i[1]),
-                              'ClosePrice': float(i[2]), 'HighPrice': float(i[3]),
-                              'LowPrice': float(i[4]), 'Open': float(i[5])}
+                        price = {'timestamp': int(api_response[0]), 'TotalAmount': float(api_response[1]),
+                              'ClosePrice': float(api_response[2]), 'HighPrice': float(api_response[3]),
+                              'LowPrice': float(api_response[4]), 'Open': float(api_response[5])}
                         price = pd.DataFrame(price)
                     except GateApiException as ex:
                         print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
@@ -234,7 +234,7 @@ class Gate_Api():
                         print("Exception when calling FuturesApi->list_candlesticks: %s\n" % e)
                         price = None
             else:
-                api_instance = get_api.SpotApi(api_client)
+                api_instance = gate_api.SpotApi(api_client)
                 end_check = api_instance.list_candlesticks(currency_pair = currency_pair, limit =1,interval =interval,
                                                             _from = None,to =None)
                 end_time = int(api_instance[0])
@@ -332,7 +332,7 @@ class Gate_Api():
         except GateApiException as ex:
             api_response =None
             content = 'Timestamp: {timestamp}, Gate api exception, label: {label}, message: %s\n'.format(
-                timestamp='timestamp', s=ex.message, label=label)
+                timestamp='timestamp', s=ex.message, label=ex.label)
             email.sendEmail(receivers=self.receiver, content=content, title='error_report')
             print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
             api_response = self.futures_rates_history(settle=settle, contract=contract, limit=limit)
@@ -381,7 +381,7 @@ class Gate_Api():
                     except GateApiException as ex:
                         print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
                         logging.warning("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
-                        content ='Timestamp: {timestamp}, Gate api exception, label: {label}, message: %s\n'.format(timestamp ='timestamp', s =ex.message,label=label)
+                        content ='Timestamp: {timestamp}, Gate api exception, label: {label}, message: %s\n'.format(timestamp ='timestamp', s =ex.message,label=ex.label)
                         email.sendEmail(receivers=self.receiver, content=content, title='error_report')
                         api_response = self.create_order(Type=Type, currency_pair=currency_pair, amount=amount, price=price, side=side,settle=settle,contract=contract,size=size,close=close,auto_size=auto_size,text=text,
                      order_type=order_type, auto_borrow=auto_borrow, iceberg=iceberg, time_in_force=time_in_force,tif =tif)
@@ -409,7 +409,7 @@ class Gate_Api():
                         print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
                         logging.warning("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
                         content = 'Timestamp: {timestamp}, Gate api exception, label: {label}, message: %s\n'.format(
-                            timestamp='timestamp', s=ex.message, label=label)
+                            timestamp='timestamp', s=ex.message, label=ex.label)
                         email.sendEmail(receivers=self.receiver, content=content, title='error_report')
                         api_response = self.create_order(Type=Type, currency_pair=currency_pair, amount=amount,
                                                          price=price, side=side, settle=settle, contract=contract,
@@ -456,7 +456,7 @@ class Gate_Api():
                     except GateApiException as ex:
                         print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
                         logging.warning("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
-                        content ='Timestamp: {timestamp}, Gate api exception, label: {label}, message: %s\n'.format(timestamp ='timestamp', s =ex.message,label=label)
+                        content ='Timestamp: {timestamp}, Gate api exception, label: {label}, message: %s\n'.format(timestamp ='timestamp', s =ex.message,label=ex.label)
                         email.sendEmail(receivers=self.receiver, content=content, title='error_report')
                         api_response = self.orders(Type=Type,currency_pair=currency_pair,amount=amount,price=price,side=side,upper_price=upper_price,down_price=down_price,settle=settle,contract=contract,size=size,close=close,auto_size=auto_size,text=text,
                      order_type=order_type, auto_borrow=auto_borrow, iceberg=iceberg, time_in_force=time_in_force,tif =tif,waiting_time=waiting_time,expiration=expiration)
@@ -851,9 +851,9 @@ class Gate_Api():
             except ApiException as e:
                 print("Exception when calling FuturesApi->cancel_futures_orders: %s\n" % e)
                 api_response = None
-            return api_response4
+            return api_response
     # cancel a single order
-    def cancel_single_order(self,Type:str, id:str,currency_pair:str, account:str,setle:str):
+    def cancel_single_order(self,Type:str, id:str,currency_pair:str, account:str,settle:str):
         api_client = gate_api.ApiClient(self.configuration)
         if Type =='Spot':
 
