@@ -382,7 +382,7 @@ class Gate_Api():
                         print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
                         logging.warning("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
                         content ='Timestamp: {timestamp}, Gate api exception, label: {label}, message: %s\n'.format(timestamp ='timestamp', s =ex.message,label=label)
-                        email.sendEmail(receivers='', content=content, title='error_report')
+                        email.sendEmail(receivers=self.receiver, content=content, title='error_report')
                         api_response = self.create_order(Type=Type, currency_pair=currency_pair, amount=amount, price=price, side=side,settle=settle,contract=contract,size=size,close=close,auto_size=auto_size,text=text,
                      order_type=order_type, auto_borrow=auto_borrow, iceberg=iceberg, time_in_force=time_in_force,tif =tif)
 
@@ -410,7 +410,7 @@ class Gate_Api():
                         logging.warning("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
                         content = 'Timestamp: {timestamp}, Gate api exception, label: {label}, message: %s\n'.format(
                             timestamp='timestamp', s=ex.message, label=label)
-                        email.sendEmail(receivers='', content=content, title='error_report')
+                        email.sendEmail(receivers=self.receiver, content=content, title='error_report')
                         api_response = self.create_order(Type=Type, currency_pair=currency_pair, amount=amount,
                                                          price=price, side=side, settle=settle, contract=contract,
                                                          size=size, close=close, auto_size=auto_size, text=text,
@@ -457,7 +457,7 @@ class Gate_Api():
                         print("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
                         logging.warning("Gate api exception, label: %s, message: %s\n" % (ex.label, ex.message))
                         content ='Timestamp: {timestamp}, Gate api exception, label: {label}, message: %s\n'.format(timestamp ='timestamp', s =ex.message,label=label)
-                        email.sendEmail(receivers='', content=content, title='error_report')
+                        email.sendEmail(receivers=self.receiver, content=content, title='error_report')
                         api_response = self.orders(Type=Type,currency_pair=currency_pair,amount=amount,price=price,side=side,upper_price=upper_price,down_price=down_price,settle=settle,contract=contract,size=size,close=close,auto_size=auto_size,text=text,
                      order_type=order_type, auto_borrow=auto_borrow, iceberg=iceberg, time_in_force=time_in_force,tif =tif,waiting_time=waiting_time,expiration=expiration)
                     except ApiException as e:
